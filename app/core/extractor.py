@@ -30,19 +30,11 @@ def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, Tok
         pil_images.append(pil_img)
 
     prompt = """
-    You are an expert medical data auditor. Extract strictly individual line items.
+    You are an expert medical data auditor. Extract individual line items.
 
-    ### 1. PAGE CLASSIFICATION RULES:
-    Classify page_type for every page:
-    - Pharmacy for drugs and expiry dates.
-    - Bill Detail for daily hospital charges.
-    - Final Bill for summary pages.
-
-    ### 2. EXTRACTION RULES:
-    - Extract every chargeable line item.
-    - Ignore SubTotal or Total-type rows.
-    - Repeat items individually if repeated.
-    - Qty missing -> 1, Rate missing -> Item Amount.
+    Classify page_type as Pharmacy, Bill Detail, or Final Bill.
+    Extract all chargeable rows, ignore aggregate totals.
+    Keep duplicates, default Qty=1, infer rate or amount when missing.
     """
 
     try:
@@ -55,7 +47,11 @@ def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, Tok
             output_tokens=usage.candidates_token_count
         )
 
-        return json.loads(response.text), token_stats
+        parsed_data = json.loads(response.text)
+        if isinstance(parsed_data, list):
+            parsed_data = {"pagewise_line_items": parsed_data}
+
+        return parsed_data, token_stats
 
     except Exception as e:
         print(f"Gemini Error: {e}")
