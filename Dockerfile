@@ -1,7 +1,9 @@
 FROM python:3.10-slim
 
-# Install system dependencies for Poppler (PDF) and OpenCV (Vision)
-RUN apt-get update && apt-get install -y \
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
     poppler-utils \
     libgl1-mesa-glx \
     libglib2.0-0 \
@@ -10,6 +12,7 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
