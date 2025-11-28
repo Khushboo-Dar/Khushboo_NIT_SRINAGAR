@@ -14,7 +14,7 @@ MODEL_NAME = "gemini-2.5-flash"
 
 def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, TokenUsage]:
     generation_config = {
-        "temperature": 0.1,
+        "temperature": 0.0,
         "response_mime_type": "application/json"
     }
 
@@ -23,43 +23,26 @@ def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, Tok
         generation_config=generation_config
     )
 
-    pil_images = [Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB)) for img in opencv_images]
+    pil_images = []
+    for img in opencv_images:
+        pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        pil_img.thumbnail((1024, 1024))
+        pil_images.append(pil_img)
 
     prompt = """
-    You are an expert medical bill auditor. Extract strictly individual line items.
+    You are an expert medical data auditor. Extract strictly individual line items.
 
-    ### 1. PAGE CLASSIFICATION:
-    Classify 'page_type' for every page:
-    - "Pharmacy": Lists drug names, batches, expiry dates.
-    - "Bill Detail": Daily charges, room rent, specific lab tests, nursing charges.
-    - "Final Bill": Summary pages with high-level categories (e.g. "Total Pharmacy").
+    ### 1. PAGE CLASSIFICATION RULES:
+    Classify page_type for every page:
+    - Pharmacy for drugs and expiry dates.
+    - Bill Detail for daily hospital charges.
+    - Final Bill for summary pages.
 
-    ### 2. EXTRACTION RULES (CRITICAL):
-    - **Granularity**: Extract EVERY single chargeable item row.
-    - **Ignore Aggregates**: DO NOT extract rows labeled "SubTotal", "Category Total", "Group Total".
-    - **Repetitive Items**: If "Blood Sugar" appears 10 times, extract all 10.
-    - **Missing Data**:
-       * Qty missing -> 1
-       * Rate missing -> Item Amount
-       * Amount missing -> Rate * Qty
-
-    ### 3. OUTPUT SCHEMA:
-    {
-        "pagewise_line_items": [
-            {
-                "page_no": "1",
-                "page_type": "Pharmacy",
-                "bill_items": [
-                    {
-                        "item_name": "Paracetamol",
-                        "item_amount": 10.0,
-                        "item_rate": 5.0,
-                        "item_quantity": 2.0
-                    }
-                ]
-            }
-        ]
-    }
+    ### 2. EXTRACTION RULES:
+    - Extract every chargeable line item.
+    - Ignore SubTotal or Total-type rows.
+    - Repeat items individually if repeated.
+    - Qty missing -> 1, Rate missing -> Item Amount.
     """
 
     try:

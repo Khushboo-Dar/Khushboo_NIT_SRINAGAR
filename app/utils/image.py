@@ -6,9 +6,8 @@ from PIL import Image
 
 def process_document(file_content: bytes, filename: str) -> list[np.ndarray]:
     images = []
-
     if filename.lower().endswith('.pdf') or file_content.startswith(b'%PDF'):
-        pil_images = convert_from_bytes(file_content, fmt='jpeg', dpi=300)
+        pil_images = convert_from_bytes(file_content, fmt='jpeg', dpi=150)
         for p_img in pil_images:
             images.append(np.array(p_img))
     else:
