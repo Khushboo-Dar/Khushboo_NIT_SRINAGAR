@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 from app.models.schemas import TokenUsage
 import logging
-import typing_extensions as typing
+import re
 
 logger = logging.getLogger(__name__)
 load_dotenv()
@@ -15,22 +15,35 @@ load_dotenv()
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 MODEL_NAME = "gemini-1.5-flash"
 
-class BillItem(typing.TypedDict):
-    item_name: str
-    item_amount: float
-    item_rate: float
-    item_quantity: float
+def clean_json_string(json_str: str) -> str:
+    json_str = re.sub(r"```json\s*", "", json_str)
+    json_str = re.sub(r"```", "", json_str)
+    json_str = json_str.strip()
 
-class PageItem(typing.TypedDict):
-    page_no: str
-    page_type: str
-    bill_items: list[BillItem]
+    start_idx = json_str.find("{")
+    list_idx = json_str.find("[")
+    if (list_idx != -1 and list_idx < start_idx) or start_idx == -1:
+        start_idx = list_idx
+        end_idx = json_str.rfind("]") + 1
+    else:
+        end_idx = json_str.rfind("}") + 1
 
-class BillResponse(typing.TypedDict):
-    pagewise_line_items: list[PageItem]
+    if start_idx != -1 and end_idx != -1:
+        return json_str[start_idx:end_idx]
+
+    return json_str
 
 def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, TokenUsage]:
     logger.info(f"Sending {len(opencv_images)} pages to {MODEL_NAME}...")
+
+    generation_config = {
+        "temperature": 0.1
+    }
+
+    model = genai.GenerativeModel(
+        model_name=MODEL_NAME,
+        generation_config=generation_config
+    )
 
     pil_images = []
     for img in opencv_images:
@@ -38,24 +51,16 @@ def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, Tok
         pil_img.thumbnail((1024, 1024))
         pil_images.append(pil_img)
 
-    generation_config = genai.GenerationConfig(
-        response_mime_type="application/json",
-        response_schema=BillResponse,
-        temperature=0.1
-    )
-
-    model = genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        generation_config=generation_config
-    )
-
     prompt = """
-    Extract medical bill line items.
-    Ignore totals, keep repeated rows, infer missing values.
+    Extract medical bill data into JSON.
+    page_type one of Bill Detail, Final Bill, Pharmacy.
+    Ignore totals and category headers.
+    Default Qty=1, compute missing amount.
     """
 
     try:
         response = model.generate_content([prompt, *pil_images])
+        raw_text = response.text
 
         if hasattr(response, "usage_metadata"):
             usage = response.usage_metadata
@@ -67,9 +72,27 @@ def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, Tok
         else:
             token_stats = TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
 
-        parsed_data = json.loads(response.text)
+        cleaned_text = clean_json_string(raw_text)
+        try:
+            parsed_data = json.loads(cleaned_text)
+        except json.JSONDecodeError:
+            return {"pagewise_line_items": []}, token_stats
+
+        if isinstance(parsed_data, list):
+            parsed_data = {"pagewise_line_items": parsed_data}
+
+        if "pagewise_line_items" not in parsed_data:
+            if "bill_items" in parsed_data:
+                parsed_data = {
+                    "pagewise_line_items": [
+                        {"page_no": "1", "page_type": "Unknown", "bill_items": parsed_data["bill_items"]}
+                    ]
+                }
+            else:
+                parsed_data["pagewise_line_items"] = []
+
         return parsed_data, token_stats
 
     except Exception as e:
-        logger.error(f"Gemini Extraction Failed: {e}")
+        logger.error(f"Gemini Extraction Critical Failure: {e}")
         return {"pagewise_line_items": []}, TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
