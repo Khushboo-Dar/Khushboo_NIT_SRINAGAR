@@ -14,7 +14,7 @@ load_dotenv()
 
 api_key = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=api_key)
-MODEL_NAME = "gemini-1.5-flash"
+MODEL_NAME = "gemini-1.5-flash-001"
 
 def clean_json_string(json_str: str) -> str:
     json_str = re.sub(r"```json\s*", "", json_str)
