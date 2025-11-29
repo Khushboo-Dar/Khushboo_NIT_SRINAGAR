@@ -1,26 +1,23 @@
-import numpy as np
-import cv2
-from pdf2image import convert_from_bytes
-from io import BytesIO
-from PIL import Image
+import requests
+from fastapi import HTTPException
 import logging
 
 logger = logging.getLogger(__name__)
 
-def process_document(file_content: bytes, filename: str = "doc.pdf") -> list[np.ndarray]:
-    logger.info("Processing document to images...")
-    images = []
+def download_file(url: str) -> bytes:
+    logger.info(f"Downloading document from: {url}")
     try:
-        if file_content.startswith(b"%PDF"):
-            pil_images = convert_from_bytes(file_content, fmt="jpeg", dpi=150)
-            for p_img in pil_images:
-                images.append(np.array(p_img))
-        else:
-            image = Image.open(BytesIO(file_content)).convert("RGB")
-            images.append(np.array(image))
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+        response = requests.get(url, headers=headers, timeout=30)
 
-        return [cv2.cvtColor(img, cv2.COLOR_RGB2BGR) for img in images]
+        if response.status_code != 200:
+            logger.error(f"Download failed with status: {response.status_code}")
+            raise HTTPException(status_code=400, detail=f"Failed to download file. Status: {response.status_code}")
+
+        return response.content
 
     except Exception as e:
-        logger.error(f"Image Processing Error: {e}")
-        raise ValueError("Invalid file format")
+        logger.error(f"Download Error: {e}")
+        raise HTTPException(status_code=400, detail=f"Download Error: {str(e)}")
