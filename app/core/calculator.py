@@ -14,18 +14,18 @@ def reconcile_totals(raw_data: dict) -> ExtractionData:
         valid_items = []
         for item in page.get("bill_items", []):
             try:
-                def clean(val):
+                def clean_num(val):
                     if isinstance(val, (int, float)):
                         return float(val)
                     if isinstance(val, str):
-                        c = val.replace(',', '').replace('₹', '').replace('$', '').strip()
+                        c = val.replace(",", "").replace("₹", "").strip()
                         return float(c) if c else 0.0
                     return 0.0
 
                 name = str(item.get("item_name", "Unknown"))
-                qty = clean(item.get("item_quantity", 1))
-                rate = clean(item.get("item_rate", 0))
-                amount = clean(item.get("item_amount", 0))
+                qty = clean_num(item.get("item_quantity", 1))
+                rate = clean_num(item.get("item_rate", 0))
+                amount = clean_num(item.get("item_amount", 0))
 
                 if amount == 0 and rate > 0:
                     amount = rate * qty
@@ -37,7 +37,6 @@ def reconcile_totals(raw_data: dict) -> ExtractionData:
                     item_quantity=qty
                 ))
                 grand_total_items += 1
-
             except:
                 continue
 
