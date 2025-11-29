@@ -12,38 +12,32 @@ import re
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+api_key = os.getenv("GEMINI_API_KEY")
+genai.configure(api_key=api_key)
 MODEL_NAME = "gemini-1.5-flash"
 
 def clean_json_string(json_str: str) -> str:
     json_str = re.sub(r"```json\s*", "", json_str)
     json_str = re.sub(r"```", "", json_str)
-    json_str = json_str.strip()
-
-    start_idx = json_str.find("{")
-    list_idx = json_str.find("[")
-    if (list_idx != -1 and list_idx < start_idx) or start_idx == -1:
-        start_idx = list_idx
-        end_idx = json_str.rfind("]") + 1
-    else:
-        end_idx = json_str.rfind("}") + 1
-
-    if start_idx != -1 and end_idx != -1:
-        return json_str[start_idx:end_idx]
-
-    return json_str
+    return json_str.strip()
 
 def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, TokenUsage]:
-    logger.info(f"Sending {len(opencv_images)} pages to {MODEL_NAME}...")
+    logger.info(f"Processing {len(opencv_images)} pages...")
 
-    generation_config = {
-        "temperature": 0.1
-    }
-
-    model = genai.GenerativeModel(
-        model_name=MODEL_NAME,
-        generation_config=generation_config
-    )
+    if not api_key:
+        error_msg = "CRITICAL ERROR: GEMINI_API_KEY is missing in environment variables"
+        return {
+            "pagewise_line_items": [{
+                "page_no": "0",
+                "page_type": "Unknown",
+                "bill_items": [{
+                    "item_name": error_msg,
+                    "item_amount": 0,
+                    "item_rate": 0,
+                    "item_quantity": 0
+                }]
+            }]
+        }, TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
 
     pil_images = []
     for img in opencv_images:
@@ -52,47 +46,42 @@ def extract_data_from_images(opencv_images: list[np.ndarray]) -> tuple[dict, Tok
         pil_images.append(pil_img)
 
     prompt = """
-    Extract medical bill data into JSON.
-    page_type one of Bill Detail, Final Bill, Pharmacy.
-    Ignore totals and category headers.
-    Default Qty=1, compute missing amount.
+    Extract medical bill line items. Return JSON only.
+    Keys: pagewise_line_items, page_no, page_type, bill_items, item_name, item_amount, item_rate, item_quantity.
     """
 
     try:
+        model = genai.GenerativeModel(MODEL_NAME)
         response = model.generate_content([prompt, *pil_images])
-        raw_text = response.text
 
+        token_stats = TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
         if hasattr(response, "usage_metadata"):
-            usage = response.usage_metadata
             token_stats = TokenUsage(
-                total_tokens=usage.total_token_count,
-                input_tokens=usage.prompt_token_count,
-                output_tokens=usage.candidates_token_count
+                total_tokens=response.usage_metadata.total_token_count,
+                input_tokens=response.usage_metadata.prompt_token_count,
+                output_tokens=response.usage_metadata.candidates_token_count
             )
+
+        cleaned = clean_json_string(response.text)
+        if cleaned.startswith("["):
+            data = {"pagewise_line_items": json.loads(cleaned)}
         else:
-            token_stats = TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
+            data = json.loads(cleaned)
 
-        cleaned_text = clean_json_string(raw_text)
-        try:
-            parsed_data = json.loads(cleaned_text)
-        except json.JSONDecodeError:
-            return {"pagewise_line_items": []}, token_stats
-
-        if isinstance(parsed_data, list):
-            parsed_data = {"pagewise_line_items": parsed_data}
-
-        if "pagewise_line_items" not in parsed_data:
-            if "bill_items" in parsed_data:
-                parsed_data = {
-                    "pagewise_line_items": [
-                        {"page_no": "1", "page_type": "Unknown", "bill_items": parsed_data["bill_items"]}
-                    ]
-                }
-            else:
-                parsed_data["pagewise_line_items"] = []
-
-        return parsed_data, token_stats
+        return data, token_stats
 
     except Exception as e:
-        logger.error(f"Gemini Extraction Critical Failure: {e}")
-        return {"pagewise_line_items": []}, TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
+        error_message = f"API FAILURE: {e}"
+        logger.error(error_message)
+        return {
+            "pagewise_line_items": [{
+                "page_no": "1",
+                "page_type": "Unknown",
+                "bill_items": [{
+                    "item_name": error_message,
+                    "item_amount": 0.0,
+                    "item_rate": 0.0,
+                    "item_quantity": 0.0
+                }]
+            }]
+        }, TokenUsage(total_tokens=0, input_tokens=0, output_tokens=0)
